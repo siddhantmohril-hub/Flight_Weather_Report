@@ -5,8 +5,21 @@ import os
 import cx_Oracle
 import requests
 import json
+os.environ['PYSPARK_SUBMIT_ARGS'] = '--jars "F:\\JAVA\\JDBC_connection\\jars\\ojdbc11.jar" pyspark-shell'
 
 class flights:
+
+    def __init__(self):
+        self.spark = SparkSession.builder.appName("Spark_Project")\
+        .config("spark.sql.streaming.fileStream.log.level", "ERROR")\
+        .config("spark.sql.streaming.log.level", "ERROR")\
+        .config("spark.log.level", "ERROR")\
+        .config("spark.driver.extraJavaOptions", "-Dlog4j.rootCategory=ERROR")\
+        .getOrCreate()
+        self.spark.sparkContext.setLogLevel("ERROR")
+        self.time=None
+        self.dayofweek=None
+        self.data=None
 
     def getWeather(self):
         api_key="cbef613dd76a4678920140213261101"
@@ -16,14 +29,54 @@ class flights:
         self.timestamp=self.data["location"]['localtime']
         self.time=int(self.timestamp[10:self.timestamp.index(":")].strip())
         self.dayofweek=datetime.today().strftime("%A")
+        self.temp=self.data["current"]["temp_c"]
+        self.windspd=self.data["current"]["wind_kph"]
+        self.visibility=self.data["current"]["vis_km"]*1000.0
         return
+    def conv_to_flt(self,val):
+        #print(type(val))
+        if isinstance(val,type(None)):
+            return 0
+        return val
+    def getFlightData(self):
+        try:
+            qry=f"SELECT * FROM FLIGHT_SCHEDULE_RAW fsr WHERE fsr.\"dayOfWeek\" LIKE '%{self.dayofweek}%'\
+                AND (FLOOR(fsr.\"scheduledArrivalTime\")={self.time}) AND fsr.\"destination\" ='Delhi'"
+            self.cur.execute(qry)
+            col=[i[0] for i in self.cur.description]
+            a=self.cur.fetchall()
+            rows_as_dict=[dict(zip(col,(x for x in r))) for r in a]
+            #print(rows_as_dict)
+            self.df1=self.spark.createDataFrame(rows_as_dict) #issue- this statement creating dataframe with random order of columns
+        except Exception as e:
+            print(e)
+
+        return
+
+    def dbconnect(self):
+        #cx_Oracle.init_oracle_client(lib_dir=r"C:\instantclient_21_7")
+        hostname='localhost'
+        username='system'
+        password='Oct_2k25'
+        SID='oracldb'
+        try:
+            connection=cx_Oracle.connect(username,password,'{0}/{1}'.format(hostname,SID))
+            print('Connection successful')
+            self.cur=connection.cursor()
+            return self.cur
+        except Exception as e:
+            return e
+
 
 def main():
     weatherobj=flights()
     weatherobj.getWeather()
     print(weatherobj.dayofweek)
     print(weatherobj.time)
-    print(weatherobj.data)
+    print(weatherobj.visibility)
+    weatherobj.dbconnect()
+    weatherobj.getFlightData()
+    weatherobj.df1.show()
     return
 
 if __name__=="__main__":
