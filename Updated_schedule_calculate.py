@@ -1,5 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import isnull
+from pyspark.sql.types import StructType,StructField,StringType,IntegerType,FloatType
 from datetime import datetime
 import os
 import cx_Oracle
@@ -22,16 +23,19 @@ class flights:
         self.data=None
 
     def getWeather(self):
-        api_key="cbef613dd76a4678920140213261101"
-        url="http://api.weatherapi.com/v1/current.json?key={}&q=28.5686,77.1122&aqi=no".format(api_key)
-        self.response=requests.get(url)
-        self.data=self.response.json()
-        self.timestamp=self.data["location"]['localtime']
-        self.time=int(self.timestamp[10:self.timestamp.index(":")].strip())
-        self.dayofweek=datetime.today().strftime("%A")
-        self.temp=self.data["current"]["temp_c"]
-        self.windspd=self.data["current"]["wind_kph"]
-        self.visibility=self.data["current"]["vis_km"]*1000.0
+        try:
+            api_key="cbef613dd76a4678920140213261101"
+            url="http://api.weatherapi.com/v1/current.json?key={}&q=28.5686,77.1122&aqi=no".format(api_key)
+            self.response=requests.get(url)
+            self.data=self.response.json()
+            self.timestamp=self.data["location"]['localtime']
+            self.time=int(self.timestamp[10:self.timestamp.index(":")].strip())
+            self.dayofweek=datetime.today().strftime("%A")
+            self.temp=self.data["current"]["temp_c"]
+            self.windspd=self.data["current"]["wind_kph"]
+            self.visibility=self.data["current"]["vis_km"]*1000
+        except Exception as e:
+            print(e)
         return
     def conv_to_flt(self,val):
         #print(type(val))
@@ -47,10 +51,29 @@ class flights:
             a=self.cur.fetchall()
             rows_as_dict=[dict(zip(col,(x for x in r))) for r in a]
             #print(rows_as_dict)
-            self.df1=self.spark.createDataFrame(rows_as_dict) #issue- this statement creating dataframe with random order of columns
+            sch = StructType([
+            StructField("flightNumber", StringType(), True),
+            StructField("airline", StringType(), True),
+            StructField("origin", StringType(), True),
+            StructField("destination", StringType(), True),
+            StructField("dayOfWeek", StringType(), True),
+            StructField("scheduledDepartureTime", FloatType(), True),
+            StructField("scheduledArrivalTime", FloatType(), True),
+            StructField("validFrom", StringType(), True),
+            StructField("validTo", StringType(), True)
+            ])
+            #print(rows_as_dict)
+            self.df1=self.spark.createDataFrame(rows_as_dict, schema=sch)
+            qry=f"SELECT * FROM FLIGHT_SCHEDULE_RAW fsr WHERE fsr.\"dayOfWeek\" LIKE '%{self.dayofweek}%'\
+                AND (FLOOR(fsr.\"scheduledDepartureTime\")={self.time}) AND fsr.\"origin\" ='Delhi'"
+            self.cur.execute(qry)
+            col=[i[0] for i in self.cur.description]
+            a=self.cur.fetchall()
+            rows_as_dict=[dict(zip(col,(x for x in r))) for r in a]
+            self.df2=self.spark.createDataFrame(rows_as_dict, schema=sch)
+            self.final_df=self.df1.union(self.df2)
         except Exception as e:
             print(e)
-
         return
 
     def dbconnect(self):
@@ -63,9 +86,11 @@ class flights:
             connection=cx_Oracle.connect(username,password,'{0}/{1}'.format(hostname,SID))
             print('Connection successful')
             self.cur=connection.cursor()
-            return self.cur
+            return
         except Exception as e:
             return e
+    def get_upadted_schedule(self):
+        pass
 
 
 def main():
@@ -76,7 +101,8 @@ def main():
     print(weatherobj.visibility)
     weatherobj.dbconnect()
     weatherobj.getFlightData()
-    weatherobj.df1.show()
+    weatherobj.final_df.show()
+    #print(weatherobj.df1.count())
     return
 
 if __name__=="__main__":
