@@ -7,10 +7,16 @@ import cx_Oracle
 import requests
 import json
 os.environ['PYSPARK_SUBMIT_ARGS'] = '--jars "F:\\JAVA\\JDBC_connection\\jars\\ojdbc11.jar" pyspark-shell'
+config={
+        "driver":"oracle.jdbc.driver.OracleDriver",
+        "url": "jdbc:oracle:thin:@localhost:1521:oracldb",
+        "user": "system",
+        "password": "Oct_2k25"
+    }
 
 class flights:
 
-    def __init__(self):
+    def __init__(self,config):
         self.spark = SparkSession.builder.appName("Spark_Project")\
         .config("spark.sql.streaming.fileStream.log.level", "ERROR")\
         .config("spark.sql.streaming.log.level", "ERROR")\
@@ -21,6 +27,7 @@ class flights:
         self.time=None
         self.dayofweek=None
         self.data=None
+        self.config=config
 
     def getWeather(self):
         try:
@@ -75,6 +82,31 @@ class flights:
         except Exception as e:
             print(e)
         return
+    def getFlightDataSprk(self):
+        try:
+            qry=f"SELECT * FROM FLIGHT_SCHEDULE_RAW fsr WHERE fsr.\"dayOfWeek\" LIKE '%{self.dayofweek}%'\
+                AND (FLOOR(fsr.\"scheduledArrivalTime\")={self.time}) AND fsr.\"destination\" ='Delhi'"
+            self.arr_df=self.spark.read.format("jdbc") \
+                .option("url",self.config["url"])\
+                .option("query",qry)\
+                .option("user",self.config["user"])\
+                .option("password",self.config["password"])\
+                .option("driver",self.config["driver"])\
+                .load()
+            self.arr_df.show()
+            qry=f"SELECT * FROM FLIGHT_SCHEDULE_RAW fsr WHERE fsr.\"dayOfWeek\" LIKE '%{self.dayofweek}%'\
+                AND (FLOOR(fsr.\"scheduledDepartureTime\")={self.time}) AND fsr.\"origin\" ='Delhi'"
+            self.dept_df=self.spark.read.format("jdbc") \
+                .option("url",self.config["url"])\
+                .option("query",qry)\
+                .option("user",self.config["user"])\
+                .option("password",self.config["password"])\
+                .option("driver",self.config["driver"])\
+                .load()
+            self.dept_df.show()
+        except Exception as e:
+            print(e)
+        return
 
     def dbconnect(self):
         #cx_Oracle.init_oracle_client(lib_dir=r"C:\instantclient_21_7")
@@ -94,14 +126,15 @@ class flights:
 
 
 def main():
-    weatherobj=flights()
+    weatherobj=flights(config)
     weatherobj.getWeather()
     print(weatherobj.dayofweek)
     print(weatherobj.time)
     print(weatherobj.visibility)
-    weatherobj.dbconnect()
-    weatherobj.getFlightData()
-    weatherobj.final_df.show()
+    #weatherobj.dbconnect()
+    #weatherobj.getFlightData()
+    weatherobj.getFlightDataSprk()
+    #weatherobj.final_df.show()
     #print(weatherobj.df1.count())
     return
 
